@@ -1,0 +1,185 @@
+--车辆分拣报表
+--EXEC sp_YJ_VehicleSort 1,'2023-12-01'
+CREATE PROC sp_YJ_VehicleSort
+	@VehicleNo INT = '',
+	@Date VARCHAR(255) = ''
+AS
+BEGIN
+	CREATE TABLE #TEMP (
+		FSeq1 INT,
+		FMaterialID1 INT,
+		FUNITID1 INT,
+		FQTY1 DECIMAL(28,10),
+
+		FSeq2 INT,
+		FMaterialID2 INT,
+		FUNITID2 INT,
+		FQTY2 DECIMAL(28,10),
+	)
+	
+	SELECT  C.FNUMBER
+	  INTO  #OrgNo
+	  FROM  T_YJ_ShopNo A
+			INNER JOIN T_YJ_ShopNoEntry B
+			ON A.FID = B.FID
+			INNER JOIN T_ORG_Organizations C
+			ON B.FShopItem = C.FORGID
+	 WHERE  1=1
+	   AND  A.FDOCUMENTSTATUS = 'C'
+	   AND  B.FShopItemType = 'ORG_Organizations'
+	   AND  B.FLineNo = @VehicleNo
+	   AND  B.FShopItem <> 0 
+	 GROUP  BY C.FNUMBER
+
+	SELECT  C.FNUMBER
+	  INTO  #DeptNo
+	  FROM  T_YJ_ShopNo A
+			INNER JOIN T_YJ_ShopNoEntry B
+			ON A.FID = B.FID
+			INNER JOIN T_BD_DEPARTMENT C
+			ON B.FShopItem = C.FDEPTID
+	 WHERE  1=1
+	   AND  A.FDOCUMENTSTATUS = 'C'
+	   AND  B.FShopItemType = 'BD_Department'
+	   AND  B.FLineNo = @VehicleNo
+	   AND  B.FShopItem <> 0 
+	 GROUP  BY C.FNUMBER
+
+	SELECT  C.FNUMBER
+	  INTO  #CustNo
+	  FROM  T_YJ_ShopNo A
+			INNER JOIN T_YJ_ShopNoEntry B
+			ON A.FID = B.FID
+			INNER JOIN T_BD_CUSTOMER C
+			ON B.FShopItem = C.FCUSTID
+	 WHERE  1=1
+	   AND  A.FDOCUMENTSTATUS = 'C'
+	   AND  B.FShopItemType = 'BD_Customer'
+	   AND  B.FLineNo = @VehicleNo
+	   AND  B.FShopItem <> 0 
+	 GROUP  BY C.FNUMBER
+	
+
+	SELECT  C.FNUMBER FMaterialNo
+		   ,D.FNUMBER FUnitNo
+		   ,SUM(B.FREALQTY)FQty
+	  INTO  #SaleTable
+	  FROM  T_SAL_OUTSTOCK A WITH(NOLOCK)
+			INNER JOIN T_SAL_OUTSTOCKENTRY B WITH(NOLOCK)
+			ON A.FID = B.FID 
+			INNER JOIN T_BD_MATERIAL C WITH(NOLOCK)
+			ON B.FMATERIALID = C.FMATERIALID
+			LEFT JOIN T_BD_UNIT D WITH(NOLOCK)
+			ON B.FUNITID = D.FUNITID 
+			LEFT JOIN T_ORG_ORGANIZATIONS ORG WITH(NOLOCK)
+			ON A.FSALEORGID = ORG.FORGID
+			LEFT JOIN T_BD_DEPARTMENT DEPT WITH(NOLOCK)
+			ON A.FSALEDEPTID = DEPT.FDEPTID
+			LEFT JOIN T_BD_CUSTOMER CUST WITH(NOLOCK)
+			ON A.FCUSTOMERID = CUST.FCUSTID
+	 WHERE  1=1
+	   AND  A.FDOCUMENTSTATUS = 'C'
+	   AND  A.FCANCELSTATUS = 'A'
+	   AND  YEAR(A.FDATE) = YEAR(@Date)
+	   AND  MONTH(A.FDATE) = MONTH(@Date)
+	   AND  DAY(A.FDATE) = DAY(@Date)
+	   AND  (    ORG.FNUMBER IN (SELECT FNUMBER FROM #OrgNo) 
+	          OR DEPT.FNUMBER IN (SELECT FNUMBER FROM #DeptNo)
+			  OR CUST.FNUMBER IN (SELECT FNUMBER FROM #CustNo)
+			)
+	 GROUP  BY C.FNUMBER,D.FNUMBER
+
+	SELECT  C.FNUMBER FMaterialNo
+		   ,D.FNUMBER FUnitNo
+		   ,SUM(B.FQty)FQty
+	  INTO  #StkTable
+	  FROM  T_STK_STKTRANSFERIN A WITH(NOLOCK)
+			INNER JOIN T_STK_STKTRANSFERINENTRY B WITH(NOLOCK)
+			ON A.FID = B.FID 
+			INNER JOIN T_BD_MATERIAL C WITH(NOLOCK)
+			ON B.FMATERIALID = C.FMATERIALID
+			LEFT JOIN T_BD_UNIT D WITH(NOLOCK)
+			ON B.FUNITID = D.FUNITID 
+			LEFT JOIN T_ORG_ORGANIZATIONS ORG WITH(NOLOCK)
+			ON A.FStockOutOrgId = ORG.FORGID
+			LEFT JOIN T_BD_DEPARTMENT DEPT WITH(NOLOCK)
+			ON A.FDeptId = DEPT.FDEPTID
+			--LEFT JOIN T_BD_CUSTOMER CUST WITH(NOLOCK)
+			--ON A.FCUSTOMERID = CUST.FCUSTID
+	 WHERE  1=1
+	   AND  A.FDOCUMENTSTATUS = 'C'
+	   AND  A.FCANCELSTATUS = 'A'
+	   AND  YEAR(A.FDATE) = YEAR(@Date)
+	   AND  MONTH(A.FDATE) = MONTH(@Date)
+	   AND  DAY(A.FDATE) = DAY(@Date)
+	   AND  (    ORG.FNUMBER IN (SELECT FNUMBER FROM #OrgNo) 
+	          OR DEPT.FNUMBER IN (SELECT FNUMBER FROM #DeptNo)
+			)
+	 GROUP  BY C.FNUMBER,D.FNUMBER
+
+	SELECT FMaterialNo,FUnitNo,SUM(FQty)FQty
+	  INTO  #ALLMaterial
+	  FROM (
+		SELECT * FROM  #SaleTable
+		UNION ALL
+		SELECT * FROM  #StkTable)A
+	 GROUP  BY FMaterialNo,FUnitNo
+
+	SELECT  ROW_NUMBER() OVER(ORDER BY B.FMaterialSeq ASC) AS FSeq
+	       ,B.FMaterialID
+		   ,B.FMaterialNo
+		   ,C.FUnitID
+		   ,A.FQty
+	  INTO  #SCMaterial
+	  FROM  #ALLMaterial A
+			INNER JOIN (SELECT  B.FMaterialID,B.FNUMBER FMaterialNo,A.FMaterialType,MIN(A.FMaterialSeq)FMaterialSeq
+						  FROM  T_YJ_MaterialInfoEntry A WITH(NOLOCK)
+								INNER JOIN T_YJ_MaterialInfo C WITH(NOLOCK)
+								ON A.FID = C.FID
+								INNER JOIN T_BD_MATERIAL B WITH(NOLOCK)
+								ON A.FMaterialID = B.FMaterialID
+						 WHERE  C.FDOCUMENTSTATUS = 'C'
+						 GROUP  BY B.FMaterialID,B.FNUMBER,A.FMaterialType)  B
+			ON A.FMaterialNo = B.FMaterialNo
+			LEFT JOIN T_BD_UNIT C
+			ON A.FUnitNo = C.FNUMBER AND C.FCREATEORGID = C.FUSEORGID
+	 WHERE  B.FMaterialType = 'SC'
+
+	SELECT  ROW_NUMBER() OVER(ORDER BY B.FMaterialSeq ASC) AS FSeq
+	       ,B.FMaterialID
+		   ,B.FMaterialNo
+		   ,C.FUnitID
+		   ,A.FQty
+	  INTO  #HCMaterial
+	  FROM  #ALLMaterial A
+			INNER JOIN (SELECT  B.FMaterialID,B.FNUMBER FMaterialNo,A.FMaterialType,MIN(A.FMaterialSeq)FMaterialSeq
+						  FROM  T_YJ_MaterialInfoEntry A WITH(NOLOCK)
+								INNER JOIN T_YJ_MaterialInfo C WITH(NOLOCK)
+								ON A.FID = C.FID
+								INNER JOIN T_BD_MATERIAL B WITH(NOLOCK)
+								ON A.FMaterialID = B.FMaterialID
+						 WHERE  C.FDOCUMENTSTATUS = 'C'
+						 GROUP  BY B.FMaterialID,B.FNUMBER,A.FMaterialType)  B
+			ON A.FMaterialNo = B.FMaterialNo
+			LEFT JOIN T_BD_UNIT C
+			ON A.FUnitNo = C.FNUMBER AND C.FCREATEORGID = C.FUSEORGID
+	 WHERE  B.FMaterialType = 'HC'
+
+	INSERT INTO #TEMP
+	SELECT  ISNULL(A.FSeq,0) FSeq1
+	       ,ISNULL(A.FMaterialID,0) FMaterialID1
+		   ,ISNULL(A.FUnitID,0) FUnitID1
+		   ,ISNULL(A.FQty,0) FQty1
+
+		   ,ISNULL(B.FSeq,0) FSeq2
+		   ,ISNULL(B.FMaterialID,0) FMaterialID2
+		   ,ISNULL(B.FUnitID,0) FUnitID2
+		   ,ISNULL(B.FQty,0) FQty2
+	  FROM  #SCMaterial A
+			FULL OUTER JOIN #HCMaterial B
+			ON A.FSeq = B.FSeq
+
+	SELECT * FROM #TEMP
+
+END
+
