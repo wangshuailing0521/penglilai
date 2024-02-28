@@ -60,6 +60,7 @@ namespace YJ.PLL.CY.Bill.PlugIn
             string categoryNos = "";
             string stockNos = "";
             string inStockNos = "";
+            int noGoodSpace = 15;
 
             DynamicObject billObj = this.Model.DataObject;
 
@@ -112,7 +113,7 @@ namespace YJ.PLL.CY.Bill.PlugIn
 
             if (inStockNoList.Count > 0)
             {
-                inStockNos = string.Format(" AND D.FNUMBER IN ({0}) ", string.Join(",", inStockNoList));
+                inStockNos = string.Format(" AND E.FNUMBER NOT IN ({0}) ", string.Join(",", inStockNoList));
                 inStockNos = inStockNos.Replace("'", "''");
             } 
 
@@ -135,8 +136,12 @@ namespace YJ.PLL.CY.Bill.PlugIn
             }
             categoryNos = string.Join(",", categoryNoList);
 
+            //断货日期范围
+            noGoodSpace = Convert.ToInt32(billObj["FNoGoodSpace"]);
+
             string sql = string.Format(
-                "EXEC sp_YJ_GoodsPurInfo {0},'{1}','{2}','{3}','{4}','{5}','{6}'", orgId, date, materialNos, materialGroupNos, categoryNos, stockNos, inStockNos);
+                "EXEC sp_YJ_GoodsPurInfo {0},'{1}','{2}','{3}','{4}','{5}','{6}','{7}'"
+                , orgId, date, materialNos, materialGroupNos, categoryNos, stockNos, inStockNos, noGoodSpace);
             
             DataSet ds = DBUtils.ExecuteDataSet(
                 this.Context, sql);
@@ -208,6 +213,7 @@ namespace YJ.PLL.CY.Bill.PlugIn
                 newEntry["FPurQty15"] = dtRow["FPurQty15"];
                 newEntry["FPurQty16"] = dtRow["FPurQty16"];
 
+                newEntry["FInventoryDay1"] = dtRow["FInventoryDay1"];
                 newEntry["FInventoryDay2"] = dtRow["FInventoryDay2"];
                 newEntry["FInventoryDay3"] = dtRow["FInventoryDay3"];
                 newEntry["FInventoryDay4"] = dtRow["FInventoryDay4"];
@@ -267,6 +273,7 @@ namespace YJ.PLL.CY.Bill.PlugIn
 
             //获取查询日期
             DateTime searchDate = Convert.ToDateTime(billObj["FDate"]);
+            int noGoodSpace = Convert.ToInt32(billObj["FNoGoodSpace"]);
 
             foreach (DynamicObject entry in entity)
             {
@@ -295,8 +302,8 @@ namespace YJ.PLL.CY.Bill.PlugIn
                 entry["FNoGoodsDay"] = "";//清空断货日期
 
                 //更新当天之后每天的库存
-                entry["FInventoryDay2"] = Convert.ToDecimal(entry["FCurrentInventory"]) - FOutAvgBy5 + Convert.ToDecimal(entry["FPurQty2"]);
-                for (int i = 3; i <= 16; i++)
+                entry["FInventoryDay1"] = Convert.ToDecimal(entry["FCurrentInventory"]) + Convert.ToDecimal(entry["FPurQty1"]);
+                for (int i = 2; i <= 16; i++)
                 {
                     entry["FInventoryDay"+ i.ToString()] = Convert.ToDecimal(entry["FInventoryDay" + (i-1).ToString()]) - FOutAvgBy5 + Convert.ToDecimal(entry["FPurQty" + i.ToString()]);
 
@@ -334,41 +341,36 @@ namespace YJ.PLL.CY.Bill.PlugIn
                     entry["FReasonableDay"] = (Convert.ToDateTime(entry["FNoGoodsDay"]).AddDays(0 - Convert.ToInt32(entry["FDeliveryDay"]))).ToString("yyyy-MM-dd");
                 }
 
-                //断货日期前是否有采购订单
-                entry["FHavePurOrder"] = "";
-                if (string.IsNullOrWhiteSpace(entry["FNoGoodsDay"].ToString()))
-                {
-                    entry["FHavePurOrder"] = "滞销";
-                }
-                if (!string.IsNullOrWhiteSpace(entry["FNoGoodsDay"].ToString()))
-                {
-                    entry["FHavePurOrder"] = "否";
-
-                    if (!string.IsNullOrWhiteSpace(entry["FDeliveryDay1"].ToString()) && Convert.ToDateTime(entry["FDeliveryDay1"]) <= Convert.ToDateTime(entry["FNoGoodsDay"]))
-                    {
-                        entry["FHavePurOrder"] = "是";
-                    }
-                }
-
-                //是否有采购订单为否时，进行下列操作
-                //建议下单日期，最优进货数量，建议到货日期
+                //断货日期前是否有采购订单(字段修改为采购建议)
+                entry["FHavePurOrder"] = "无";
                 entry["FSuggestDay"] = "";
                 entry["FMaxGoodQty"] = 0;
                 entry["FSuggestDeliveryDay"] = "";
-                if (entry["FHavePurOrder"].ToString() == "否")
+                if (!string.IsNullOrWhiteSpace(entry["FNoGoodsDay"].ToString()) )
                 {
-                    entry["FSuggestDay"] = entry["FReasonableDay"];
-                    //最优进货数量
-                    entry["FMaxGoodQty"] = entry["FSafeInventory"];
-
-                    if (Convert.ToDecimal(entry["FSafeInventory"]) < Convert.ToDecimal(entry["FMinPurQty"]))
+                    TimeSpan duration = Convert.ToDateTime(entry["FNoGoodsDay"]) - Convert.ToDateTime(DateTime.Now.ToString("yyyy-MM-dd"));
+                    int days = duration.Days;
+                    if (duration.Days <= noGoodSpace)
                     {
-                        entry["FMaxGoodQty"] = entry["FMinPurQty"];
-                    }
+                        entry["FHavePurOrder"] = "有";
+                        entry["FSuggestDay"] = entry["FReasonableDay"];
+                        //建议下单日期(建议下单日期=MAX(合理下单日期，当天))
+                        if (Convert.ToDateTime(entry["FReasonableDay"]) < Convert.ToDateTime(DateTime.Now.ToString("yyyy-MM-dd")))
+                        {
+                            entry["FSuggestDay"] = DateTime.Now.ToString("yyyy-MM-dd");
+                        }
+                        //最优进货数量
+                        entry["FMaxGoodQty"] = entry["FSafeInventory"];
 
-                    if (!string.IsNullOrWhiteSpace(entry["FSuggestDay"].ToString()) && !string.IsNullOrWhiteSpace(entry["FDeliveryDay"].ToString()))
-                    {
-                        entry["FSuggestDeliveryDay"] = (Convert.ToDateTime(entry["FSuggestDay"]).AddDays(Convert.ToInt32(entry["FDeliveryDay"]))).ToString("yyyy-MM-dd");
+                        if (Convert.ToDecimal(entry["FSafeInventory"]) < Convert.ToDecimal(entry["FMinPurQty"]))
+                        {
+                            entry["FMaxGoodQty"] = entry["FMinPurQty"];
+                        }
+                        //建议到货日期
+                        if (!string.IsNullOrWhiteSpace(entry["FSuggestDay"].ToString()) && !string.IsNullOrWhiteSpace(entry["FDeliveryDay"].ToString()))
+                        {
+                            entry["FSuggestDeliveryDay"] = (Convert.ToDateTime(entry["FSuggestDay"]).AddDays(Convert.ToInt32(entry["FDeliveryDay"]))).ToString("yyyy-MM-dd");
+                        }
                     }
                 }
             }
@@ -405,15 +407,23 @@ namespace YJ.PLL.CY.Bill.PlugIn
                 }
 
                 DateTime FNoGoodsDay = Convert.ToDateTime(entry["FNoGoodsDay"]);
-                TimeSpan interval = FNoGoodsDay.Subtract(searchDate); // 计算时间间隔
-                //int days = interval.Days;// 提取天数部分
 
                 var backColor = "#FF0000";
-                for (int days = interval.Days; days <= 15; days++)
+                for (int days = 1; days <= 16; days++)
                 {
-                    entryGrid.SetBackcolor("FInventoryDay" + (days + 1).ToString(), backColor, x);
+                    if (Convert.ToDecimal(entry["FInventoryDay" + days.ToString()]) < Convert.ToDecimal(entry["FMaxOutStockBy10"]))
+                    {
+                        entryGrid.SetBackcolor("FInventoryDay" + days.ToString(), backColor, x);
+                    }
                 }
                 
+                //采购建议
+                if (entry["FSuggestDay"].ToString() == DateTime.Now.ToString("yyyy-MM-dd") && Convert.ToString(entry["FHavePurOrder"]) == "有")
+                {
+                    entryGrid.SetBackcolor("FSuggestDay", backColor, x);
+                    entryGrid.SetBackcolor("FMaxGoodQty", backColor, x);
+                    entryGrid.SetBackcolor("FSuggestDeliveryDay", backColor, x);
+                }
             }
         }
     }

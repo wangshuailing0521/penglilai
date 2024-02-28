@@ -218,13 +218,14 @@ namespace YJ.PLL.CY.Bill.PlugIn
 
         private bool FillBillPropertysVehicle(IBillView billView, string vehicleNo)
         {
+            long orgId = this.Context.CurrentOrganizationInfo.ID;
             // 把billView转换为IDynamicFormViewService接口：
             // 调用IDynamicFormViewService.UpdateValue: 会执行字段的值更新事件
             // 调用 dynamicFormView.SetItemValueByNumber ：不会执行值更新事件，需要继续调用：
             // ((IDynamicFormView)dynamicFormView).InvokeFieldUpdateService(key, rowIndex);
             IDynamicFormViewService dynamicFormView = billView as IDynamicFormViewService;
 
-            string sql = string.Format("EXEC sp_YJ_VehicleSort {0},'{1}'", vehicleNo, date);
+            string sql = string.Format("EXEC sp_YJ_VehicleSort {0},'{1}','{2}'", vehicleNo, date, orgId);
             DynamicObjectCollection data = DBUtils.ExecuteDynamicObject(this.Context, sql);
 
             if (data.Count <= 0)
@@ -232,6 +233,7 @@ namespace YJ.PLL.CY.Bill.PlugIn
                 return false;
             }
 
+            dynamicFormView.SetItemValueByID("FOrgId", orgId, 0);
             dynamicFormView.UpdateValue("FDate", 0, date);
             dynamicFormView.UpdateValue("FVersion", 0, "V1.0");
             dynamicFormView.UpdateValue("FVehicleSeq", 0, vehicleNo);
@@ -365,8 +367,8 @@ namespace YJ.PLL.CY.Bill.PlugIn
             // 调用 dynamicFormView.SetItemValueByNumber ：不会执行值更新事件，需要继续调用：
             // ((IDynamicFormView)dynamicFormView).InvokeFieldUpdateService(key, rowIndex);
             IDynamicFormViewService dynamicFormView = billView as IDynamicFormViewService;
-
-            string sql = string.Format("EXEC sp_YJ_StockSort '{0}','{1}'", stockNo, date);
+            long orgId = this.Context.CurrentOrganizationInfo.ID;
+            string sql = string.Format("EXEC sp_YJ_StockSort '{0}','{1}','{2}'", stockNo, date,orgId);
             DynamicObjectCollection data = DBUtils.ExecuteDynamicObject(this.Context, sql);
 
             if (data.Count <= 0)
@@ -377,8 +379,9 @@ namespace YJ.PLL.CY.Bill.PlugIn
             if (string.IsNullOrWhiteSpace(stockNo))
             {
                 stockNo = "总计";
-            }    
+            }
 
+            dynamicFormView.SetItemValueByID("FOrgId", orgId, 0);
             dynamicFormView.UpdateValue("FDate", 0, date);
             dynamicFormView.UpdateValue("FVersion", 0, "V1.0");
             dynamicFormView.UpdateValue("FBatchSeqText", 0, stockNo);

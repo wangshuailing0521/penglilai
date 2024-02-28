@@ -3,7 +3,9 @@
 ALTER PROC sp_YJ_VehicleSendDetail
 	@TempTable VARCHAR(36),
 	@VehicleNo INT = '',
-	@Date VARCHAR(255) = ''
+	@Date VARCHAR(255) = '',
+	@OrgId INT = 0,
+	@IsReport INT = 0
 AS
 BEGIN
 	CREATE TABLE #TEMP (
@@ -83,6 +85,7 @@ BEGIN
 	 WHERE  1=1
 	   AND  A.FDOCUMENTSTATUS = 'C'
 	   AND  A.FCANCELSTATUS = 'A'
+	   AND  A.FSALEORGID = @OrgId
 	   AND  YEAR(A.FDATE) = YEAR(@Date)
 	   AND  MONTH(A.FDATE) = MONTH(@Date)
 	   AND  DAY(A.FDATE) = DAY(@Date)
@@ -109,13 +112,17 @@ BEGIN
 			ON B.FUNITID = D.FUNITID 
 			LEFT JOIN T_ORG_ORGANIZATIONS ORG WITH(NOLOCK)
 			ON A.FStockOutOrgId = ORG.FORGID
+			LEFT JOIN T_BD_STOCK BS
+			ON B.FDESTSTOCKID = BS.FSTOCKID
 			LEFT JOIN T_BD_DEPARTMENT DEPT WITH(NOLOCK)
-			ON A.FDeptId = DEPT.FDEPTID
+			ON BS.F_ora_xy1 = DEPT.FDEPTID
 			--LEFT JOIN T_BD_CUSTOMER CUST WITH(NOLOCK)
 			--ON A.FCUSTOMERID = CUST.FCUSTID
 	 WHERE  1=1
-	   AND  A.FDOCUMENTSTATUS = 'C'
+	   --AND  A.FDOCUMENTSTATUS = 'C'
 	   AND  A.FCANCELSTATUS = 'A'
+	   AND  A.FOBJECTTYPEID = 'STK_TransferDirect'
+	   AND  A.FStockOutOrgId = @OrgId
 	   AND  YEAR(A.FDATE) = YEAR(@Date)
 	   AND  MONTH(A.FDATE) = MONTH(@Date)
 	   AND  DAY(A.FDATE) = DAY(@Date)
@@ -200,7 +207,11 @@ BEGIN
 		SET @ItemName = REPLACE(@ItemName,'(','')
 		SET @ItemName = REPLACE(@ItemName,')','')
 		SET @ItemName = REPLACE(@ItemName,'-','')
-		SET @ItemName = @ItemName + '-' + @ItemSeq
+		
+		IF(@IsReport = 0)
+		BEGIN
+			SET @ItemName = @ItemName + '-' + @ItemSeq
+		END
 
 		IF(@ItemType = 'ORG_Organizations')
 		BEGIN

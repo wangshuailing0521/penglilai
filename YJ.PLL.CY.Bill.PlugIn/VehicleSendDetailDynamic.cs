@@ -34,6 +34,13 @@ namespace YJ.PLL.CY.Bill.PlugIn
         private string vehicleNo = "";
         private string date = DateTime.Now.ToString("yyyy-MM-dd");
 
+        public override void OnInitialize(InitializeEventArgs e)
+        {
+            base.OnInitialize(e);
+
+            ExcelPackage.LicenseContext = OfficeOpenXml.LicenseContext.NonCommercial;
+        }
+
         public override void AfterButtonClick(AfterButtonClickEventArgs e)
         {
             base.AfterButtonClick(e);
@@ -126,7 +133,7 @@ namespace YJ.PLL.CY.Bill.PlugIn
             ExcelPackage execlPackage = new ExcelPackage(fileInfo);
             try
             {
-                long iD = this.Context.CurrentOrganizationInfo.ID;
+                long orgId = this.Context.CurrentOrganizationInfo.ID;
                 ExcelWorkbook workbook = execlPackage.Workbook;
                 //CreateCataLog(workbook, fileName, execlPackage);
 
@@ -134,14 +141,14 @@ namespace YJ.PLL.CY.Bill.PlugIn
                 foreach (var vehicle in vehicleList)
                 {
                     vehicleNo = vehicle["FLineNo"].ToString();
-
-                    string sql = string.Format("EXEC sp_YJ_VehicleSendDetail '',{0},'{1}'", vehicleNo, date);
+                    string sql = string.Format("EXEC sp_YJ_VehicleSendDetail '',{0},'{1}','{2}'", vehicleNo, date, orgId);
                     DataSet dataSet = DBUtils.ExecuteDataSet(this.Context, sql);
                     DataTable data = dataSet.Tables[0];
                     if (data.Rows.Count > 0)
                     {
                         DataTableToExcel(data, string.Format("车辆号【{0}】", vehicleNo), true, fileName, workbook, execlPackage);
                     }
+                    
                     this.View.Session["ProcessRateValue"] = Convert.ToInt32(1 / vehicleList.Count);
                 }
                 //UpdateCataLog(fileName, execlPackage);
@@ -227,11 +234,9 @@ namespace YJ.PLL.CY.Bill.PlugIn
                     workSheet.View.ShowGridLines = false;
 
                     #region 设置表头数据
-                    workSheet.Cells[1, 1].Value = "车辆线路号:";
-                    workSheet.Cells[1, 3].Value = vehicleNo;
-                    workSheet.Cells[2, 1].Value = "送货日期:";
-                    workSheet.Cells[2, 3].Value = date;
-
+                    workSheet.Cells[1, 1].Value = string.Format("车辆线路号:  {0}", vehicleNo);
+                    workSheet.Cells[2, 1].Value = string.Format("送货日期:  {0}", date); 
+                    
                     workSheet.Cells[1, 3].Style.HorizontalAlignment = ExcelHorizontalAlignment.Center;
                     workSheet.Cells[1, 3].Style.VerticalAlignment = ExcelVerticalAlignment.Center;
                     workSheet.Cells[2, 3].Style.HorizontalAlignment = ExcelHorizontalAlignment.Center;
@@ -338,9 +343,9 @@ namespace YJ.PLL.CY.Bill.PlugIn
                             workSheet.Cells[3, columnIndex].Style.Border.Left.Style = ExcelBorderStyle.Thin;
                             workSheet.Cells[3, columnIndex].Style.Border.Right.Style = ExcelBorderStyle.Thin;
 
-                            //workSheet.Cells[3, columnIndex].Style.SetTextVertical(); //文字竖排
-                            workSheet.Row(3).Height = 20;//行高
-                            workSheet.Column(columnIndex).Width = 15;
+                            workSheet.Cells[3, columnIndex].Style.SetTextVertical(); //文字竖排
+                            workSheet.Row(3).Height = 120;//行高
+                            workSheet.Column(columnIndex).Width = 4;
 
                             ColumnInfo columnInfo = new ColumnInfo();
                             columnInfo.ColumnName = columnName;

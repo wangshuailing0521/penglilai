@@ -51,7 +51,7 @@ namespace YJ.PLL.CY.Bill.PlugIn
                 vehicleNo = customFilter["FVehicleNo"].ToString();
             }
 
-            string sql = string.Format("EXEC sp_YJ_VehicleSendDetail '{0}',{1},'{2}'", tempName, vehicleNo, date);
+            string sql = string.Format("EXEC sp_YJ_VehicleSendDetail '{0}',{1},'{2}',0,1", tempName, vehicleNo, date);
 
             DynamicObjectCollection table 
                 = DBUtils.ExecuteDynamicObject(this.Context, sql);
@@ -112,6 +112,8 @@ namespace YJ.PLL.CY.Bill.PlugIn
                 {
                     i = 100;
                 }
+
+                fileLocalName = fileLocalName.Replace("-", "");
 
                 header.AddChild(fileName, new LocaleValue(fileLocalName));
                 header.AddChild(fileName, new LocaleValue(fileLocalName)).ColIndex = i;

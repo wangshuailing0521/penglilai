@@ -1,6 +1,6 @@
 --货物跟踪订货表
 --SELECT FSTOCKORGID,COUNT(1) FROM T_STK_INVENTORY GROUP BY FSTOCKORGID
---EXEC sp_YJ_GoodsPurInfo 101328,'2023-12-05'
+--EXEC sp_YJ_GoodsPurInfo 101328,'2024-02-01'
 ALTER PROC sp_YJ_GoodsPurInfo
 	@OrgId INT = 0,
 	@CurrentDay VARCHAR(10) = '',
@@ -8,7 +8,8 @@ ALTER PROC sp_YJ_GoodsPurInfo
 	@MaterialGroups VARCHAR(2000) = '',
 	@CategoryNos VARCHAR(2000) = '',
 	@StockNos VARCHAR(2000) = '',
-	@InStockNos VARCHAR(2000) = ''
+	@InStockNos VARCHAR(2000) = '',
+	@NoGoodSpace INT = 15 --断货日期范围
 AS
 BEGIN
 	DECLARE @SQL VARCHAR(4000)
@@ -43,6 +44,7 @@ BEGIN
 		FOutAvgBy5 DECIMAL(28,10) DEFAULT 0, --5日均发货数量
 		FOutAvgByHand DECIMAL(28,10) DEFAULT 0, --大批量备货用日均增加值（手工数）
 		FCurrentInventory DECIMAL(28,10) DEFAULT 0, --即时库存（库存单位）2023/10/10
+		FPurQty1 DECIMAL(28,10) DEFAULT 0, --当天到货数量（隐藏）
 		FPurQty2 DECIMAL(28,10) DEFAULT 0, --第2天到货数量（隐藏）
 		FPurQty3 DECIMAL(28,10) DEFAULT 0, --第3天到货数量（隐藏）
 		FPurQty4 DECIMAL(28,10) DEFAULT 0, --第2天到货数量（隐藏）
@@ -58,6 +60,7 @@ BEGIN
 		FPurQty14 DECIMAL(28,10) DEFAULT 0, --第2天到货数量（隐藏）
 		FPurQty15 DECIMAL(28,10) DEFAULT 0, --第2天到货数量（隐藏）
 		FPurQty16 DECIMAL(28,10) DEFAULT 0, --第2天到货数量（隐藏）
+		FInventoryDay1 DECIMAL(28,10) DEFAULT 0, --当天预计库存
 		FInventoryDay2 DECIMAL(28,10) DEFAULT 0, --第2天库存
 		FInventoryDay3 DECIMAL(28,10) DEFAULT 0,
 		FInventoryDay4 DECIMAL(28,10) DEFAULT 0,
@@ -90,6 +93,14 @@ BEGIN
 		FSuggestDay VARCHAR(255) DEFAULT '',  --建议下单日期
 		FMaxGoodQty DECIMAL(28,10) DEFAULT 0, --最优进货数量
 		FSuggestDeliveryDay VARCHAR(255) DEFAULT '',  --建议到货日期
+	)
+
+	CREATE TABLE #OUTSTOCKTEMP(
+		FStockOrgId INT,
+		FDATE DATETIME,
+		FStockNo VARCHAR(255),
+		FMaterialNo VARCHAR(255),
+		FQty DECIMAL(28,10)
 	)
 
 	INSERT INTO #TEMP(
@@ -133,58 +144,120 @@ BEGIN
 	DECLARE @OutBeginDateTime DATETIME
 	DECLARE @OutEndDateTime DATETIME
 
+	
+	SET @OutBeginDateTime = DATEADD(DAY,-10,@CurrentDay)
+	SET @OutEndDateTime = DATEADD(DAY,1,@CurrentDay)
+
+	--获取销售出库数量
+	SET @SQL = '
+	INSERT INTO #OUTSTOCKTEMP
+	SELECT  A.FStockOrgId,A.FDATE,D.FNumber FStockNo,C.FNUMBER FMaterialNo,SUM(B.FRealQty)FQty
+	  FROM  T_SAL_OUTSTOCK A
+			INNER JOIN T_SAL_OUTSTOCKENTRY B
+			ON A.FID = B.FID
+			INNER JOIN T_BD_MATERIAL C
+			ON B.FMATERIALID = C.FMATERIALID
+			INNER JOIN T_BD_STOCK D
+			ON B.FStockId = D.FStockId
+	 WHERE  1=1
+	   AND  A.FDOCUMENTSTATUS = ''C''
+	   AND  A.FCANCELSTATUS = ''A''
+	   AND  A.FStockOrgId = '+CONVERT(VARCHAR(10),@OrgId)+'
+	   AND  A.FDATE >= '''+CONVERT(VARCHAR(10),@OutBeginDateTime,120)+'''
+	   AND  A.FDATE < '''+CONVERT(VARCHAR(10),@OutEndDateTime,120)+'''
+	 GROUP  BY A.FStockOrgId,D.FNumber,C.FNUMBER,A.FDATE '
+	EXECUTE (@SQL)
+	--获取直接调拨数量
+	SET @SQL = '
+	INSERT INTO #OUTSTOCKTEMP
+	SELECT  A.FStockOutOrgId FStockOrgId,A.FDATE,D.FNumber FStockNo,C.FNUMBER FMaterialNo,SUM(B.FQty)FQty
+	  FROM  T_STK_STKTRANSFERIN A WITH(NOLOCK)
+			INNER JOIN T_STK_STKTRANSFERINENTRY B WITH(NOLOCK)
+			ON A.FID = B.FID
+			INNER JOIN T_BD_MATERIAL C WITH(NOLOCK)
+			ON B.FMATERIALID = C.FMATERIALID
+			INNER JOIN T_BD_STOCK D WITH(NOLOCK)
+			ON B.FSrcStockId = D.FStockId
+			INNER JOIN T_BD_STOCK E WITH(NOLOCK)
+			ON B.FDestStockId = E.FStockId
+	 WHERE  1=1
+	   AND  A.FDOCUMENTSTATUS = ''C''
+	   AND  A.FCANCELSTATUS = ''A''
+	   AND  A.FOBJECTTYPEID = ''STK_TransferDirect''
+	   AND  A.FBILLTYPEID = ''ce8f49055c5c4782b65463a3f863bb4a''
+	   AND  A.FDATE >= '''+CONVERT(VARCHAR(10),@OutBeginDateTime,120)+'''
+	   AND  A.FDATE < '''+CONVERT(VARCHAR(10),@OutEndDateTime,120)+'''
+	   '+@InStockNos+'
+	 GROUP  BY A.FStockOutOrgId,D.FNumber,C.FNUMBER,A.FDATE '
+	EXECUTE (@SQL)
+
 	SET @OutDayInt = 1
 	WHILE(@OutDayInt < 11)
 	BEGIN
 		SET @OutBeginDateTime = DATEADD(DAY,0 - (10 - @OutDayInt),@CurrentDay)
 		SET @OutEndDateTime = DATEADD(DAY,1,@OutBeginDateTime)
 		
-		--获取销售出库数量
-		SET @SQL = '
-		UPDATE  A
-		   SET  A.FOutStockDay'+CONVERT(VARCHAR(10),@OutDayInt,120)+' = ISNULL(A.FOutStockDay'+CONVERT(VARCHAR(10),@OutDayInt,120)+',0) + ISNULL(B.FQty,0)
-		  FROM  #TEMP A
-				INNER JOIN (SELECT  A.FStockOrgId,D.FNumber FStockNo,C.FNUMBER FMaterialNo,SUM(B.FRealQty)FQty
-							  FROM  T_SAL_OUTSTOCK A
-									INNER JOIN T_SAL_OUTSTOCKENTRY B
-									ON A.FID = B.FID
-									INNER JOIN T_BD_MATERIAL C
-									ON B.FMATERIALID = C.FMATERIALID
-									INNER JOIN T_BD_STOCK D
-									ON B.FStockId = D.FStockId
-							 WHERE  1=1
-							   AND  A.FDOCUMENTSTATUS = ''C''
-							   AND  A.FCANCELSTATUS = ''A''
-							   AND  A.FStockOrgId = '+CONVERT(VARCHAR(10),@OrgId)+'
-							   AND  A.FDATE >= '''+CONVERT(VARCHAR(10),@OutBeginDateTime,120)+'''
-							   AND  A.FDATE < '''+CONVERT(VARCHAR(10),@OutEndDateTime,120)+'''
-							 GROUP  BY A.FStockOrgId,D.FNumber,C.FNUMBER) B
-				ON A.FStockOrgId = B.FStockOrgId AND A.FStockNo = B.FStockNo AND A.FMaterialNo = B.FMaterialNo '
-		EXECUTE (@SQL)
+		----获取销售出库数量
+		--SET @SQL = '
+		--UPDATE  A
+		--   SET  A.FOutStockDay'+CONVERT(VARCHAR(10),@OutDayInt,120)+' = ISNULL(A.FOutStockDay'+CONVERT(VARCHAR(10),@OutDayInt,120)+',0) + ISNULL(B.FQty,0)
+		--  FROM  #TEMP A
+		--		INNER JOIN (SELECT  A.FStockOrgId,D.FNumber FStockNo,C.FNUMBER FMaterialNo,SUM(B.FRealQty)FQty
+		--					  FROM  T_SAL_OUTSTOCK A
+		--							INNER JOIN T_SAL_OUTSTOCKENTRY B
+		--							ON A.FID = B.FID
+		--							INNER JOIN T_BD_MATERIAL C
+		--							ON B.FMATERIALID = C.FMATERIALID
+		--							INNER JOIN T_BD_STOCK D
+		--							ON B.FStockId = D.FStockId
+		--					 WHERE  1=1
+		--					   AND  A.FDOCUMENTSTATUS = ''C''
+		--					   AND  A.FCANCELSTATUS = ''A''
+		--					   AND  A.FStockOrgId = '+CONVERT(VARCHAR(10),@OrgId)+'
+		--					   AND  A.FDATE >= '''+CONVERT(VARCHAR(10),@OutBeginDateTime,120)+'''
+		--					   AND  A.FDATE < '''+CONVERT(VARCHAR(10),@OutEndDateTime,120)+'''
+		--					 GROUP  BY A.FStockOrgId,D.FNumber,C.FNUMBER) B
+		--		ON A.FStockOrgId = B.FStockOrgId AND A.FStockNo = B.FStockNo AND A.FMaterialNo = B.FMaterialNo '
+		--EXECUTE (@SQL)
 
 		--获取直接调拨数量
 		SET @SQL = '
 		UPDATE  A
 		   SET  A.FOutStockDay'+CONVERT(VARCHAR(10),@OutDayInt,120)+' = ISNULL(A.FOutStockDay'+CONVERT(VARCHAR(10),@OutDayInt,120)+',0) + ISNULL(B.FQty,0)
 		  FROM  #TEMP A
-				INNER JOIN (SELECT  A.FStockOutOrgId FStockOrgId,D.FNumber FStockNo,C.FNUMBER FMaterialNo,SUM(B.FQty)FQty
-							  FROM  T_STK_STKTRANSFERIN A WITH(NOLOCK)
-									INNER JOIN T_STK_STKTRANSFERINENTRY B WITH(NOLOCK)
-									ON A.FID = B.FID
-									INNER JOIN T_BD_MATERIAL C WITH(NOLOCK)
-									ON B.FMATERIALID = C.FMATERIALID
-									INNER JOIN T_BD_STOCK D WITH(NOLOCK)
-									ON B.FSrcStockId = D.FStockId
+				INNER JOIN (SELECT  A.FStockOrgId,A.FStockNo,A.FMaterialNo,SUM(A.FQty)FQty
+							  FROM  #OUTSTOCKTEMP A
 							 WHERE  1=1
-							   AND  A.FDOCUMENTSTATUS = ''C''
-							   AND  A.FCANCELSTATUS = ''A''
-							   AND  A.FBILLTYPEID = ''ce8f49055c5c4782b65463a3f863bb4a''
 							   AND  A.FDATE >= '''+CONVERT(VARCHAR(10),@OutBeginDateTime,120)+'''
 							   AND  A.FDATE < '''+CONVERT(VARCHAR(10),@OutEndDateTime,120)+'''
-							   '+@InStockNos+'
-							 GROUP  BY A.FStockOutOrgId,D.FNumber,C.FNUMBER) B
+							 GROUP  BY A.FStockOrgId,A.FStockNo,A.FMaterialNo) B
 				ON A.FStockOrgId = B.FStockOrgId AND A.FStockNo = B.FStockNo AND A.FMaterialNo = B.FMaterialNo '
 		EXECUTE (@SQL)
+		--SET @SQL = '
+		--UPDATE  A
+		--   SET  A.FOutStockDay'+CONVERT(VARCHAR(10),@OutDayInt,120)+' = ISNULL(A.FOutStockDay'+CONVERT(VARCHAR(10),@OutDayInt,120)+',0) + ISNULL(B.FQty,0)
+		--  FROM  #TEMP A
+		--		INNER JOIN (SELECT  A.FStockOutOrgId FStockOrgId,D.FNumber FStockNo,C.FNUMBER FMaterialNo,SUM(B.FQty)FQty
+		--					  FROM  T_STK_STKTRANSFERIN A WITH(NOLOCK)
+		--							INNER JOIN T_STK_STKTRANSFERINENTRY B WITH(NOLOCK)
+		--							ON A.FID = B.FID
+		--							INNER JOIN T_BD_MATERIAL C WITH(NOLOCK)
+		--							ON B.FMATERIALID = C.FMATERIALID
+		--							INNER JOIN T_BD_STOCK D WITH(NOLOCK)
+		--							ON B.FSrcStockId = D.FStockId
+		--							INNER JOIN T_BD_STOCK E WITH(NOLOCK)
+		--							ON B.FDestStockId = E.FStockId
+		--					 WHERE  1=1
+		--					   AND  A.FDOCUMENTSTATUS = ''C''
+		--					   AND  A.FCANCELSTATUS = ''A''
+		--					   --AND  A.FOBJECTTYPEID = ''STK_TransferDirect''
+		--					   AND  A.FBILLTYPEID = ''ce8f49055c5c4782b65463a3f863bb4a''
+		--					   AND  A.FDATE >= '''+CONVERT(VARCHAR(10),@OutBeginDateTime,120)+'''
+		--					   AND  A.FDATE < '''+CONVERT(VARCHAR(10),@OutEndDateTime,120)+'''
+		--					   '+@InStockNos+'
+		--					 GROUP  BY A.FStockOutOrgId,D.FNumber,C.FNUMBER) B
+		--		ON A.FStockOrgId = B.FStockOrgId AND A.FStockNo = B.FStockNo AND A.FMaterialNo = B.FMaterialNo '
+		--EXECUTE (@SQL)
 
 		SET @OutDayInt = @OutDayInt + 1
 	END
@@ -224,7 +297,7 @@ BEGIN
 	DECLARE @PurDayFileName VARCHAR(255)
 	DECLARE @InDayFileName VARCHAR(255)
 	
-	SET @InDayInt = 1
+	SET @InDayInt = 0
 	SET @PurBeginDateTime = DATEADD(DAY,@InDayInt,@CurrentDay)
 	WHILE(@InDayInt < 16)
 	BEGIN
@@ -237,10 +310,12 @@ BEGIN
 		UPDATE  A
 		   SET  A.'+@PurDayFileName+' =  ISNULL(B.FQty,0)
 		  FROM  #TEMP A
-				LEFT JOIN (SELECT  A.FPurchaseOrgId FStockOrgId,D.FNumber FStockNo,C.FNUMBER FMaterialNo,SUM(BDP.FPlanQty)FQty
+				LEFT JOIN (SELECT  A.FPurchaseOrgId FStockOrgId,D.FNumber FStockNo,C.FNUMBER FMaterialNo,SUM(BR.FRemainStockINQty)FQty
 							  FROM  t_PUR_POOrder A
 									INNER JOIN t_PUR_POOrderEntry B
 									ON A.FID = B.FID
+									INNER JOIN T_PUR_POORDERENTRY_R BR
+									ON B.FENTRYID = BR.FENTRYID
 									INNER JOIN t_PUR_POENTRYDELIPLAN BDP
 									ON B.FENTRYID = BDP.FENTRYID
 									INNER JOIN T_BD_MATERIAL C
@@ -252,6 +327,9 @@ BEGIN
 							 WHERE  1=1
 							   AND  A.FDOCUMENTSTATUS = ''C''
 							   AND  A.FCANCELSTATUS = ''A''
+							   AND  B.FMRPCloseStatus = ''A''
+							   AND  B.FMRPTerminateStatus = ''A''
+							   AND  ISNULL(B.F_UNLF_LXBS,'''') <> ''2'' --非特采
 							   AND  A.FPurchaseOrgId = '+CONVERT(VARCHAR(10),@OrgId)+'
 							   AND  BDP.FDELIVERYDATE >= '''+CONVERT(VARCHAR(10),DATEADD(DAY,-1,@PurEndDateTime),120)+'''
 							   AND  BDP.FDELIVERYDATE < '''+CONVERT(VARCHAR(10),@PurEndDateTime,120)+'''
@@ -265,10 +343,12 @@ BEGIN
 		UPDATE  A
 		   SET  A.'+@InDayFileName+' = FCurrentInventory - FOutAvgBy5 * '+CONVERT(VARCHAR(10),@InDayInt)+' + ISNULL(B.FQty,0)
 		  FROM  #TEMP A
-				LEFT JOIN (SELECT  A.FPurchaseOrgId FStockOrgId,D.FNumber FStockNo,C.FNUMBER FMaterialNo,SUM(BDP.FPlanQty)FQty
+				LEFT JOIN (SELECT  A.FPurchaseOrgId FStockOrgId,D.FNumber FStockNo,C.FNUMBER FMaterialNo,SUM(BR.FRemainStockINQty)FQty
 							  FROM  t_PUR_POOrder A
 									INNER JOIN t_PUR_POOrderEntry B
 									ON A.FID = B.FID
+									INNER JOIN T_PUR_POORDERENTRY_R BR
+									ON B.FENTRYID = BR.FENTRYID
 									INNER JOIN t_PUR_POENTRYDELIPLAN BDP
 									ON B.FENTRYID = BDP.FENTRYID
 									INNER JOIN T_BD_MATERIAL C
@@ -280,6 +360,9 @@ BEGIN
 							 WHERE  1=1
 							   AND  A.FDOCUMENTSTATUS = ''C''
 							   AND  A.FCANCELSTATUS = ''A''
+							   AND  B.FMRPCloseStatus = ''A''
+							   AND  B.FMRPTerminateStatus = ''A''
+							   AND  ISNULL(B.F_UNLF_LXBS,'''') <> ''2'' --非特采
 							   AND  A.FPurchaseOrgId = '+CONVERT(VARCHAR(10),@OrgId)+'
 							   AND  BDP.FDELIVERYDATE >= '''+CONVERT(VARCHAR(10),@PurBeginDateTime,120)+'''
 							   AND  BDP.FDELIVERYDATE < '''+CONVERT(VARCHAR(10),@PurEndDateTime,120)+'''
@@ -291,28 +374,6 @@ BEGIN
 		SET @SQL = 'UPDATE #TEMP SET FNoGoodsDay = '''+CONVERT(VARCHAR(10),DATEADD(DAY,@InDayInt,@CurrentDay),120) +''' 
 					WHERE '+@InDayFileName+' < FMaxOutStockBy10 AND FNoGoodsDay = '''''
 		EXECUTE (@SQL)
-
-		----更新已下采购订单到货日期，已下采购订单数量
-		--SET @SQL = 'UPDATE #TEMP SET FDeliveryDay3 = '''+CONVERT(VARCHAR(10),DATEADD(DAY,@InDayInt,@CurrentDay),120) +''' ,FDeliveryDay3Qty = '+@PurDayFileName+'
-		--            WHERE FDeliveryDay1 <> '''' 
-		--			  AND FDeliveryDay2 <> ''''
-		--			  AND FDeliveryDay3 = ''''
-		--			  AND  '+@PurDayFileName+' > 0 '
-		--EXECUTE (@SQL)
-
-		--SET @SQL = 'UPDATE #TEMP SET FDeliveryDay2 = '''+CONVERT(VARCHAR(10),DATEADD(DAY,@InDayInt,@CurrentDay),120) +''' ,FDeliveryDay2Qty = '+@PurDayFileName+'
-		--            WHERE FDeliveryDay1 <> '''' 
-		--			  AND FDeliveryDay2 = ''''
-		--			  AND FDeliveryDay3 = ''''
-		--			  AND  '+@PurDayFileName+' > 0 '
-		--EXECUTE (@SQL)
-
-		--SET @SQL = 'UPDATE #TEMP SET FDeliveryDay1 = '''+CONVERT(VARCHAR(10),DATEADD(DAY,@InDayInt,@CurrentDay),120) +''' ,FDeliveryDay1Qty = '+@PurDayFileName+'
-		--            WHERE FDeliveryDay1 = '''' 
-		--			  AND FDeliveryDay2 = ''''
-		--			  AND FDeliveryDay3 = ''''
-		--			  AND  '+@PurDayFileName+' > 0 '
-		--EXECUTE (@SQL)
 
 		SET @InDayInt = @InDayInt + 1
 	END
@@ -338,6 +399,7 @@ BEGIN
 	   AND  A.FCANCELSTATUS = 'A'
 	   AND  B.FMRPCloseStatus = 'A'
 	   AND  B.FMRPTerminateStatus = 'A'
+	   AND  ISNULL(B.F_UNLF_LXBS,'') <> '2' --非特采
 	   AND  A.FPurchaseOrgId = @OrgId	
 	   AND  BR.FRemainStockINQty > 0
 	 GROUP  BY A.FPurchaseOrgId,D.FNumber,C.FNUMBER,BDP.FDELIVERYDATE
@@ -377,20 +439,26 @@ BEGIN
 	UPDATE #TEMP SET FCanDeliveryDay = FCurrentInventory / FOutAvgBy5 WHERE FOutAvgBy5 <> 0
 	--合理下单日期(断货日期减到货天数)
 	UPDATE #TEMP SET FReasonableDay = CONVERT(VARCHAR(10), DATEADD(DAY,0 - FDeliveryDay,FNoGoodsDay) ,120) WHERE FNoGoodsDay <> ''
-	--断货日期前是否有采购订单
-	UPDATE #TEMP SET FHavePurOrder = '滞销' WHERE FNoGoodsDay = ''
-	UPDATE #TEMP SET FHavePurOrder = '否' WHERE  FNoGoodsDay <> ''
-	UPDATE #TEMP SET FHavePurOrder = '是' WHERE FNoGoodsDay <> '' AND FDeliveryDay1 <> '' AND FDeliveryDay1 <= FNoGoodsDay
+	--断货日期前是否有采购订单(字段修改为采购建议)
+	UPDATE #TEMP SET FHavePurOrder = '无'
+	
+	UPDATE #TEMP SET FHavePurOrder = '有' 
+	WHERE FNoGoodsDay <> '' AND DATEDIFF(DAY,GETDATE(),CONVERT(VARCHAR(10),FNoGoodsDay,120)) <= @NoGoodSpace
+	--UPDATE #TEMP SET FHavePurOrder = '否' WHERE FNoGoodsDay <> ''
+	--UPDATE #TEMP SET FHavePurOrder = '是' WHERE FNoGoodsDay <> '' AND FDeliveryDay1 <> '' AND FDeliveryDay1 <= FNoGoodsDay
 	--是否有采购订单为否时，进行下列操作
-	--建议下单日期
-	UPDATE #TEMP SET FSuggestDay = FReasonableDay WHERE FHavePurOrder = '否'
+	--建议下单日期(建议下单日期=MAX(合理下单日期，当天))
+	UPDATE #TEMP SET FSuggestDay = FReasonableDay WHERE FHavePurOrder = '有'
+	UPDATE #TEMP SET FSuggestDay = CONVERT(VARCHAR(10),GETDATE(),120) 
+	  WHERE FHavePurOrder = '有' 
+	    AND FReasonableDay <> '' AND CONVERT(DATETIME,FReasonableDay) < CONVERT(DATETIME,CONVERT(VARCHAR(10),GETDATE(),120))
 	--最优进货数量
-	UPDATE #TEMP SET FMaxGoodQty = FSafeInventory WHERE FHavePurOrder = '否'
-	UPDATE #TEMP SET FMaxGoodQty = FMinPurQty WHERE FSafeInventory < FMinPurQty AND FHavePurOrder = '否'
+	UPDATE #TEMP SET FMaxGoodQty = FSafeInventory WHERE FHavePurOrder = '有'
+	UPDATE #TEMP SET FMaxGoodQty = FMinPurQty WHERE FSafeInventory < FMinPurQty AND FHavePurOrder = '有'
 	--建议到货日期
-	UPDATE #TEMP SET FSuggestDeliveryDay = CONVERT(VARCHAR(10),DATEADD(DAY,0 + FDeliveryDay,FSuggestDay),120)  WHERE FSuggestDay <> '' AND FHavePurOrder = '否'
+	UPDATE #TEMP SET FSuggestDeliveryDay = CONVERT(VARCHAR(10),DATEADD(DAY,0 + FDeliveryDay,FSuggestDay),120)  WHERE FSuggestDay <> '' AND FHavePurOrder = '有'
 
 	DELETE FROM #TEMP WHERE FOutAvgBy10 = 0
 
-	SELECT * FROM #TEMP 
+	SELECT * FROM #TEMP ORDER BY FStockId,FMaterialId
 END
