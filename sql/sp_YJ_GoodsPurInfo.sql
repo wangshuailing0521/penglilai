@@ -197,28 +197,6 @@ BEGIN
 		SET @OutBeginDateTime = DATEADD(DAY,0 - (10 - @OutDayInt),@CurrentDay)
 		SET @OutEndDateTime = DATEADD(DAY,1,@OutBeginDateTime)
 		
-		----获取销售出库数量
-		--SET @SQL = '
-		--UPDATE  A
-		--   SET  A.FOutStockDay'+CONVERT(VARCHAR(10),@OutDayInt,120)+' = ISNULL(A.FOutStockDay'+CONVERT(VARCHAR(10),@OutDayInt,120)+',0) + ISNULL(B.FQty,0)
-		--  FROM  #TEMP A
-		--		INNER JOIN (SELECT  A.FStockOrgId,D.FNumber FStockNo,C.FNUMBER FMaterialNo,SUM(B.FRealQty)FQty
-		--					  FROM  T_SAL_OUTSTOCK A
-		--							INNER JOIN T_SAL_OUTSTOCKENTRY B
-		--							ON A.FID = B.FID
-		--							INNER JOIN T_BD_MATERIAL C
-		--							ON B.FMATERIALID = C.FMATERIALID
-		--							INNER JOIN T_BD_STOCK D
-		--							ON B.FStockId = D.FStockId
-		--					 WHERE  1=1
-		--					   AND  A.FDOCUMENTSTATUS = ''C''
-		--					   AND  A.FCANCELSTATUS = ''A''
-		--					   AND  A.FStockOrgId = '+CONVERT(VARCHAR(10),@OrgId)+'
-		--					   AND  A.FDATE >= '''+CONVERT(VARCHAR(10),@OutBeginDateTime,120)+'''
-		--					   AND  A.FDATE < '''+CONVERT(VARCHAR(10),@OutEndDateTime,120)+'''
-		--					 GROUP  BY A.FStockOrgId,D.FNumber,C.FNUMBER) B
-		--		ON A.FStockOrgId = B.FStockOrgId AND A.FStockNo = B.FStockNo AND A.FMaterialNo = B.FMaterialNo '
-		--EXECUTE (@SQL)
 
 		--获取直接调拨数量
 		SET @SQL = '
@@ -233,31 +211,6 @@ BEGIN
 							 GROUP  BY A.FStockOrgId,A.FStockNo,A.FMaterialNo) B
 				ON A.FStockOrgId = B.FStockOrgId AND A.FStockNo = B.FStockNo AND A.FMaterialNo = B.FMaterialNo '
 		EXECUTE (@SQL)
-		--SET @SQL = '
-		--UPDATE  A
-		--   SET  A.FOutStockDay'+CONVERT(VARCHAR(10),@OutDayInt,120)+' = ISNULL(A.FOutStockDay'+CONVERT(VARCHAR(10),@OutDayInt,120)+',0) + ISNULL(B.FQty,0)
-		--  FROM  #TEMP A
-		--		INNER JOIN (SELECT  A.FStockOutOrgId FStockOrgId,D.FNumber FStockNo,C.FNUMBER FMaterialNo,SUM(B.FQty)FQty
-		--					  FROM  T_STK_STKTRANSFERIN A WITH(NOLOCK)
-		--							INNER JOIN T_STK_STKTRANSFERINENTRY B WITH(NOLOCK)
-		--							ON A.FID = B.FID
-		--							INNER JOIN T_BD_MATERIAL C WITH(NOLOCK)
-		--							ON B.FMATERIALID = C.FMATERIALID
-		--							INNER JOIN T_BD_STOCK D WITH(NOLOCK)
-		--							ON B.FSrcStockId = D.FStockId
-		--							INNER JOIN T_BD_STOCK E WITH(NOLOCK)
-		--							ON B.FDestStockId = E.FStockId
-		--					 WHERE  1=1
-		--					   AND  A.FDOCUMENTSTATUS = ''C''
-		--					   AND  A.FCANCELSTATUS = ''A''
-		--					   --AND  A.FOBJECTTYPEID = ''STK_TransferDirect''
-		--					   AND  A.FBILLTYPEID = ''ce8f49055c5c4782b65463a3f863bb4a''
-		--					   AND  A.FDATE >= '''+CONVERT(VARCHAR(10),@OutBeginDateTime,120)+'''
-		--					   AND  A.FDATE < '''+CONVERT(VARCHAR(10),@OutEndDateTime,120)+'''
-		--					   '+@InStockNos+'
-		--					 GROUP  BY A.FStockOutOrgId,D.FNumber,C.FNUMBER) B
-		--		ON A.FStockOrgId = B.FStockOrgId AND A.FStockNo = B.FStockNo AND A.FMaterialNo = B.FMaterialNo '
-		--EXECUTE (@SQL)
 
 		SET @OutDayInt = @OutDayInt + 1
 	END
@@ -266,7 +219,7 @@ BEGIN
 		FOutStockDay1 + FOutStockDay2 +FOutStockDay3 + FOutStockDay4 + FOutStockDay5  + FOutStockDay6
 	  + FOutStockDay7 + FOutStockDay8 + FOutStockDay9 + FOutStockDay10) / 10
 	UPDATE #TEMP SET FOutAvgBy5 = (
-		FOutStockDay1 + FOutStockDay2 +FOutStockDay3 + FOutStockDay4 + FOutStockDay5) / 5
+		FOutStockDay6 + FOutStockDay7 +FOutStockDay8 + FOutStockDay9 + FOutStockDay5) / 5
 
 	DELETE FROM #TEMP WHERE FOutAvgBy10 = 0
 

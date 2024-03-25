@@ -291,7 +291,7 @@ namespace YJ.PLL.CY.Bill.PlugIn
                 decimal FOutStockDay9 = Convert.ToDecimal(entry["FOutStockDay9"]);
                 decimal FOutStockDay10 = Convert.ToDecimal(entry["FOutStockDay10"]);
                 //5日均发货数量
-                decimal FOutAvgBy5 = (FOutStockDay1 + FOutStockDay2 + FOutStockDay3 + FOutStockDay4 + FOutStockDay5)/5;
+                decimal FOutAvgBy5 = (FOutStockDay5 + FOutStockDay6 + FOutStockDay7 + FOutStockDay8 + FOutStockDay9)/5;
                 decimal FOutAvgBy10 = (FOutStockDay1 + FOutStockDay2 + FOutStockDay3 + FOutStockDay4 + FOutStockDay5
                                      + FOutStockDay6 + FOutStockDay7 + FOutStockDay8 + FOutStockDay9 + FOutStockDay10) / 10;
 

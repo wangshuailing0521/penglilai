@@ -230,6 +230,7 @@ namespace YJ.PLL.CY.Bill.PlugIn
                     int rowIndex = 0;
                     int columnIndex = 0;
 
+     
                     ExcelWorksheet workSheet = workbook.Worksheets.Add(sheetName);
                     workSheet.View.ShowGridLines = false;
 
@@ -345,7 +346,7 @@ namespace YJ.PLL.CY.Bill.PlugIn
 
                             workSheet.Cells[3, columnIndex].Style.SetTextVertical(); //文字竖排
                             workSheet.Row(3).Height = 120;//行高
-                            workSheet.Column(columnIndex).Width = 4;
+                            workSheet.Column(columnIndex).Width = 5;
 
                             ColumnInfo columnInfo = new ColumnInfo();
                             columnInfo.ColumnName = columnName;
@@ -401,6 +402,8 @@ namespace YJ.PLL.CY.Bill.PlugIn
                             }
                         }
 
+                        workSheet.Row(rowIndex).Height = 20;
+
                         rowIndex++;
                     }
 
@@ -422,6 +425,8 @@ namespace YJ.PLL.CY.Bill.PlugIn
                     workSheet.Cells[2, 1].Style.Fill.BackgroundColor.SetColor(Color.LightBlue);
 
                     workSheet.Column(2).Width = 25;
+
+                    workSheet.Cells.Style.Font.Size = 12;
                     #endregion
 
                     using (Stream stream = new FileStream(fileName, FileMode.Create))

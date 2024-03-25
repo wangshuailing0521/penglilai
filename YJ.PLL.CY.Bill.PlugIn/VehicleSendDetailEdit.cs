@@ -420,6 +420,7 @@ namespace YJ.PLL.CY.Bill.PlugIn
                     workSheet.Cells[2, 1].Style.Fill.BackgroundColor.SetColor(Color.LightBlue);
 
                     workSheet.Column(2).Width = 25;
+                    workSheet.Cells.Style.Font.Size = 13;
                     #endregion
 
                     using (Stream stream = new FileStream(fileName, FileMode.Create))
